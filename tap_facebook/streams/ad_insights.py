@@ -14,6 +14,7 @@ from facebook_business.adobjects.adsactionstats import AdsActionStats
 from facebook_business.adobjects.adshistogramstats import AdsHistogramStats
 from facebook_business.adobjects.adsinsights import AdsInsights
 from facebook_business.api import FacebookAdsApi
+from facebook_business.exceptions import FacebookRequestError
 from singer_sdk import typing as th
 from singer_sdk.streams.core import REPLICATION_INCREMENTAL, Stream
 
@@ -67,6 +68,7 @@ EXCLUDED_FIELDS = [
 SLEEP_TIME_INCREMENT = 5
 INSIGHTS_MAX_WAIT_TO_START_SECONDS = 5 * 60
 INSIGHTS_MAX_WAIT_TO_FINISH_SECONDS = 30 * 60
+INSIGHTS_JOB_NOT_FOUND_MAX_RETRIES = 5
 
 
 class AdsInsightStream(Stream):
@@ -167,9 +169,22 @@ class AdsInsightStream(Stream):
         )
         status = None
         time_start = time.time()
+        not_found_retries = 0
         while status != "Job Completed":
             duration = time.time() - time_start
-            job = job.api_get()
+            try:
+                job = job.api_get()
+            except FacebookRequestError as e:
+                if e.api_error_subcode() == 33 and not_found_retries < INSIGHTS_JOB_NOT_FOUND_MAX_RETRIES:
+                    not_found_retries += 1
+                    self.logger.warning(
+                        "Async job object not yet available (subcode 33), retrying (%d/%d)...",
+                        not_found_retries,
+                        INSIGHTS_JOB_NOT_FOUND_MAX_RETRIES,
+                    )
+                    time.sleep(SLEEP_TIME_INCREMENT)
+                    continue
+                raise
             status = job[AdReportRun.Field.async_status]
             percent_complete = job[AdReportRun.Field.async_percent_completion]
 
