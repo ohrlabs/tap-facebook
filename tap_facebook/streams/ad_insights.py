@@ -64,6 +64,9 @@ EXCLUDED_FIELDS = [
     "marketing_messages_phone_call_btn_click_rate",
     "marketing_messages_website_purchase_values",
     "wish_bid",
+    # Returns "(#100) Tried accessing nonexisting summary field" as of 2026-07-25,
+    # despite still being present in the facebook-business SDK's field enum.
+    "marketing_messages_website_purchase_values",
 ]
 
 SLEEP_TIME_INCREMENT = 5
