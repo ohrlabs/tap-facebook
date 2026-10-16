@@ -73,6 +73,29 @@ SLEEP_TIME_INCREMENT = 5
 INSIGHTS_MAX_WAIT_TO_START_SECONDS = 5 * 60
 INSIGHTS_MAX_WAIT_TO_FINISH_SECONDS = 30 * 60
 INSIGHTS_JOB_NOT_FOUND_MAX_RETRIES = 5
+# Covers a typical incremental sync (28-day lookback, plus yesterday and today)
+# in one async job, rather than one job per time increment.
+DEFAULT_DAYS_PER_JOB = 31
+
+
+def report_time_ranges(
+    start: pendulum.Date,
+    end: pendulum.Date,
+    time_increment: int,
+    days_per_job: int,
+) -> t.Iterator[tuple[pendulum.Date, pendulum.Date]]:
+    """Split the dates from start to end into the time ranges of successive jobs.
+
+    Both ends of each range are inclusive, as in the Insights API's time_range,
+    so consecutive ranges never overlap. Each range is a whole number of time
+    increments, so increments are never split across jobs; only the last range
+    can be cut short, at end.
+    """
+    days_per_job = max(time_increment, days_per_job - days_per_job % time_increment)
+    while start <= end:
+        until = min(start.add(days=days_per_job - 1), end)
+        yield start, until
+        start = until.add(days=1)
 
 
 class AdsInsightStream(Stream):
@@ -298,11 +321,13 @@ class AdsInsightStream(Stream):
             self.config.get("end_date", pendulum.today().to_date_string()),
         ).date()
 
-        report_start = self._get_start_date(context)
-        report_end = report_start.add(days=time_increment)
-
         columns = self._get_selected_columns()
-        while report_start <= sync_end_date:
+        for report_start, report_end in report_time_ranges(
+            self._get_start_date(context),
+            sync_end_date,
+            time_increment,
+            self._report_definition.get("days_per_job", DEFAULT_DAYS_PER_JOB),
+        ):
             params = {
                 "level": self._report_definition["level"],
                 "action_breakdowns": self._report_definition["action_breakdowns"],
@@ -323,6 +348,3 @@ class AdsInsightStream(Stream):
             job = self._run_job_to_completion(params)  # type: ignore[func-returns-value]
             for obj in job.get_result():
                 yield obj.export_all_data()
-            # Bump to the next increment
-            report_start = report_start.add(days=time_increment)
-            report_end = report_end.add(days=time_increment)

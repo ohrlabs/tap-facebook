@@ -23,6 +23,7 @@ from tap_facebook.streams import (
     CustomAudiences,
     CustomConversions,
 )
+from tap_facebook.streams.ad_insights import DEFAULT_DAYS_PER_JOB
 
 STREAM_TYPES = [
     AdsetsStream,
@@ -47,6 +48,7 @@ DEFAULT_INSIGHT_REPORT = {
     "action_attribution_windows_click": "7d_click",
     "action_report_time": "mixed",
     "lookback_window": 28,
+    "days_per_job": DEFAULT_DAYS_PER_JOB,
 }
 
 
@@ -165,6 +167,17 @@ class TapFacebook(Tap):
                             "last emitted it, so we attempt to retrieve it again."
                         ),
                         default=28,
+                    ),
+                    th.Property(
+                        "days_per_job",
+                        th.IntegerType,
+                        description=(
+                            "The number of days of stats to request in each async insights "
+                            "job, rounded down to a whole number of time increments. Fewer, "
+                            "larger jobs make fewer API calls; lower this if jobs over long "
+                            "ranges (e.g. an initial backfill) time out or fail."
+                        ),
+                        default=DEFAULT_DAYS_PER_JOB,
                     ),
                 ),
             ),
