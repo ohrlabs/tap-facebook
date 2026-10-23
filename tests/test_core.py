@@ -2,10 +2,14 @@
 
 import os
 
+import pytest
 from singer_sdk.testing import SuiteConfig, get_tap_test_class
 
 from tap_facebook.streams import AdAccountsStream
 from tap_facebook.tap import TapFacebook
+
+if not os.environ.get("TAP_FACEBOOK_ACCESS_TOKEN"):
+    pytest.skip("No Facebook API credentials", allow_module_level=True)
 
 SAMPLE_CONFIG = {
     "start_date": "2021-03-01T00:00:00Z",

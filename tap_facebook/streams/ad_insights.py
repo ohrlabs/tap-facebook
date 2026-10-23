@@ -236,7 +236,7 @@ class AdsInsightStream(Stream):
             msg = f"Couldn't find account with id {account_id}"
             raise RuntimeError(msg)
 
-    def _run_job_to_completion(self, params: dict) -> None:
+    def _run_job_to_completion(self, params: dict) -> AdReportRun:
         job, _ = call_with_backoff(
             lambda: self.account.get_insights(params=params, is_async=True),
             self.logger,
@@ -394,6 +394,6 @@ class AdsInsightStream(Stream):
                     "until": report_end.to_date_string(),
                 },
             }
-            job = self._run_job_to_completion(params)  # type: ignore[func-returns-value]
+            job = self._run_job_to_completion(params)
             for obj in job.get_result():
                 yield obj.export_all_data()

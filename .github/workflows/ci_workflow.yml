@@ -26,7 +26,6 @@ permissions:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    if: ${{ secrets.tap_facebook_access_token != '' }}
     env:
       GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
     strategy:

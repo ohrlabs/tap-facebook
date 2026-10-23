@@ -23,7 +23,8 @@ jobs:
     environment:
       name: publishing
       url: https://pypi.org/p/meltano-tap-facebook
-    if: startsWith(github.ref, 'refs/tags/')
+    # Only upstream can publish to PyPI; our ohr-* tags are only install pins.
+    if: startsWith(github.ref, 'refs/tags/') && github.repository == 'MeltanoLabs/tap-facebook'
     steps:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
