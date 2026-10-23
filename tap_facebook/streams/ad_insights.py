@@ -19,6 +19,8 @@ from singer_sdk import typing as th
 from singer_sdk.streams.core import REPLICATION_INCREMENTAL, Stream
 
 if t.TYPE_CHECKING:
+    import logging
+
     from singer_sdk.helpers.types import Context
 
 EXCLUDED_FIELDS = [
@@ -73,6 +75,14 @@ SLEEP_TIME_INCREMENT = 5
 INSIGHTS_MAX_WAIT_TO_START_SECONDS = 5 * 60
 INSIGHTS_MAX_WAIT_TO_FINISH_SECONDS = 30 * 60
 INSIGHTS_JOB_NOT_FOUND_MAX_RETRIES = 5
+# Throttling errors: 4 is the app-level limit, which the insights platform
+# raises under load (subcode 1504022), 17 the user-level limit and 80000 the
+# ads_insights business use case limit. Meta marks these transient, so back
+# off and retry: 1, 2, 4, 8, 15 and 15 minutes, 45 in all.
+RATE_LIMIT_ERROR_CODES = frozenset({4, 17, 80000})
+RATE_LIMIT_MAX_RETRIES = 6
+RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 60
+RATE_LIMIT_MAX_BACKOFF_SECONDS = 15 * 60
 # One day per job. Since 2026-10-21, a job over more than one day that selects
 # action or click fields (actions, inline_link_clicks, outbound_clicks, ...)
 # comes back with spend, impressions and clicks zeroed for nearly every ad.
@@ -98,6 +108,41 @@ def report_time_ranges(
         until = min(start.add(days=days_per_job - 1), end)
         yield start, until
         start = until.add(days=1)
+
+
+T = t.TypeVar("T")
+
+
+def call_with_backoff(call: t.Callable[[], T], logger: logging.Logger) -> tuple[T, float]:
+    """Make an API call, backing off and retrying while Meta rate limits it.
+
+    Returns the call's result and the seconds spent backing off, so callers
+    timing a job can leave the throttled time out.
+    """
+    backoff_seconds = 0.0
+    retries = 0
+    while True:
+        try:
+            return call(), backoff_seconds
+        except FacebookRequestError as e:  # noqa: PERF203
+            rate_limited = e.api_error_code() in RATE_LIMIT_ERROR_CODES
+            if not rate_limited or retries == RATE_LIMIT_MAX_RETRIES:
+                raise
+            delay = min(
+                RATE_LIMIT_INITIAL_BACKOFF_SECONDS * 2**retries,
+                RATE_LIMIT_MAX_BACKOFF_SECONDS,
+            )
+            retries += 1
+            logger.warning(
+                "Rate limited (code %s, subcode %s), retrying in %d seconds (%d/%d)...",
+                e.api_error_code(),
+                e.api_error_subcode(),
+                delay,
+                retries,
+                RATE_LIMIT_MAX_RETRIES,
+            )
+            time.sleep(delay)
+            backoff_seconds += delay
 
 
 class AdsInsightStream(Stream):
@@ -192,9 +237,9 @@ class AdsInsightStream(Stream):
             raise RuntimeError(msg)
 
     def _run_job_to_completion(self, params: dict) -> None:
-        job = self.account.get_insights(
-            params=params,
-            is_async=True,
+        job, _ = call_with_backoff(
+            lambda: self.account.get_insights(params=params, is_async=True),
+            self.logger,
         )
         status = None
         time_start = time.time()
@@ -202,7 +247,9 @@ class AdsInsightStream(Stream):
         while status != "Job Completed":
             duration = time.time() - time_start
             try:
-                job = job.api_get()
+                job, backoff_seconds = call_with_backoff(job.api_get, self.logger)
+                # Time spent throttled isn't the job failing to start or finish.
+                time_start += backoff_seconds
             except FacebookRequestError as e:
                 if e.api_error_subcode() == 33 and not_found_retries < INSIGHTS_JOB_NOT_FOUND_MAX_RETRIES:
                     not_found_retries += 1
