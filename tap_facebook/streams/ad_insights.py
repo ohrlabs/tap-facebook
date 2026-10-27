@@ -83,11 +83,13 @@ RATE_LIMIT_ERROR_CODES = frozenset({4, 17, 80000})
 RATE_LIMIT_MAX_RETRIES = 6
 RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 60
 RATE_LIMIT_MAX_BACKOFF_SECONDS = 15 * 60
-# One day per job. Since 2026-10-21, a job over more than one day that selects
-# action or click fields (actions, inline_link_clicks, outbound_clicks, ...)
-# comes back with spend, impressions and clicks zeroed for nearly every ad.
-# 1-day jobs are unaffected. Raise this again once Meta fixes it.
-DEFAULT_DAYS_PER_JOB = 1
+# Covers a typical incremental sync (28-day lookback, plus yesterday and today)
+# in one async job, rather than one job per time increment. From 2026-10-21
+# Meta zeroed spend in multi-day jobs that selected action or click fields
+# alongside ~100 others; by 2026-10-27, with 36 fields selected (actions,
+# inline_link_clicks and outbound_clicks among them), a 28-day job matched
+# 1-day jobs exactly.
+DEFAULT_DAYS_PER_JOB = 31
 
 
 def report_time_ranges(
